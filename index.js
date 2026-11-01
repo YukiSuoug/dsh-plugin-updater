@@ -561,7 +561,11 @@ function readInstalled(profileDir, packageName) {
  */
 function resolveOpenTarget(kind, name, source, installed) {
   if (kind === 'local') {
+    // 优先真实目录（软链解开后的开发目录）；解不出就退回 source 里写的路径，
+    // 至少让用户能打开「它以为的那个目录」，而不是整个按钮消失。
     if (installed.dir !== '') return { kind: 'folder', target: installed.dir }
+    const declared = typeof source === 'string' ? source.replace(/^(?:link|file):/i, '') : ''
+    if (declared !== '' && path.isAbsolute(declared)) return { kind: 'folder', target: declared }
     return null
   }
   if (kind === 'shipped') return null
@@ -1207,7 +1211,13 @@ export function apply(ctx) {
       if (opened.ok === true) {
         writeJson(response, 200, { ok: true, kind: open.kind, target: open.target, via: opened.via })
       } else {
-        writeJson(response, 500, { ok: false, error: opened.error })
+        // 把「想打开什么」一起带回去：界面上能直接看出是路径不对还是命令失败
+        writeJson(response, 500, {
+          ok: false,
+          error: `${opened.error}\n目标：${open.target}`,
+          target: open.target,
+          kind: open.kind,
+        })
       }
       return
     }
