@@ -16,22 +16,28 @@
 
 ## 安装
 
-方式一（推荐，与「添加插件」完全同一条路）：DSH 侧栏 → **插件** → **添加插件** →「本地目录路径」填
+**推荐：从仓库装**（与「添加插件」完全同一条路）——DSH 侧栏 → **插件** → **添加插件**，
+粘贴仓库地址：
 
 ```
-D:\1\AI\dshp\dsh-plugin-updater
+https://github.com/YukiSuoug/dsh-plugin-updater
 ```
 
-方式二（命令行，直接从这个仓库装）：
+或者命令行：
 
 ```sh
-dsh plugin --profile desktop add github:YukiSuoug/dsh-plugin-updater
+dsh plugin --profile <你的 profile> add github:YukiSuoug/dsh-plugin-updater
 ```
 
-方式三（本地开发，改完代码即时生效）：
+`<你的 profile>` 通常是 `desktop`（桌面客户端）或 `web`。
+
+**本地开发装法**（改完代码即时生效，无需重新安装）：
 
 ```sh
-dsh plugin --profile desktop add link:D:/1/AI/dshp/dsh-plugin-updater
+git clone https://github.com/YukiSuoug/dsh-plugin-updater
+cd dsh-plugin-updater
+npm install && npm run build
+dsh plugin --profile <你的 profile> add link:<clone 下来的绝对路径>
 ```
 
 装完打开 **插件 → 更新**。

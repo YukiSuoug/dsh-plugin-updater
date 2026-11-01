@@ -53,7 +53,7 @@ packages:
 const MOCK_BUNDLES = [
   { name: 'dsh-whale-widget', version: '0.3.0', source: 'dsh-whale-widget@^0.3.0', installed: true, enabled: true, removable: true, official: false, meta: { title: '余额鲸鱼' } },
   { name: 'dsh-better-sidebar', version: '0.19.1', source: 'dsh-better-sidebar@^0.19.1', installed: true, enabled: true, removable: true, official: false, meta: { title: { zh: '更好的侧栏', en: 'Better sidebar' } } },
-  { name: 'dsh-moss-layout', version: '0.12.2', source: 'link:D:/1/AI/dshp/dsh-moss-layout', installed: true, enabled: true, removable: true, official: false, meta: {} },
+  { name: 'dsh-moss-layout', version: '0.12.2', source: 'link:/opt/dsh-plugins/dsh-moss-layout', installed: true, enabled: true, removable: true, official: false, meta: {} },
   { name: 'dsh-rewind-plugin', version: '0.18.1', source: 'github:omdsh-dev/DSH-better-sidebar', installed: true, enabled: false, removable: true, official: false },
   { name: 'dsh-git-stale', version: '1.0.0', source: 'git+https://github.com/omdsh-dev/DSH-better-sidebar.git#0000000000000000000000000000000000000000', installed: true, enabled: true, removable: true, official: false, meta: { title: '过期 Git 快照' } },
   { name: '@deepseek-ai/dsh-base', version: '0.2.1-rc.5', installed: true, enabled: true, removable: false, official: true },
