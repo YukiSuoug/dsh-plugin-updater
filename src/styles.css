@@ -52,6 +52,18 @@
   white-space: nowrap;
 }
 
+/* 宿主半区代码版本：一眼看出跑的是不是新代码 */
+.pu-hostrev {
+  padding: 0 5px;
+  border-radius: var(--dsw-radius-xs, 4px);
+  border: 1px dashed var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.28));
+  color: var(--dsw-alias-label-dimmed, rgba(128, 128, 128, 0.7));
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: help;
+}
+
 /* ---------- 按钮 ---------- */
 
 .pu-btn {
@@ -386,6 +398,13 @@
   border: 1px solid var(--dsw-alias-state-error-secondary, rgba(229, 72, 77, 0.4));
   background: var(--dsw-alias-state-error-tertiary, rgba(229, 72, 77, 0.1));
   color: var(--dsw-alias-state-error-primary, #e5484d);
+}
+
+/* 打开成功也要有回执：否则「窗口在后面」和「根本没事发生」无法区分 */
+.pu-banner-ok {
+  border: 1px solid var(--dsw-alias-state-success-secondary, rgba(47, 158, 68, 0.35));
+  background: var(--dsw-alias-state-success-tertiary, rgba(47, 158, 68, 0.1));
+  color: var(--dsw-alias-state-success-primary, #2f9e44);
 }
 
 /* ---------- 安装源选择器 ---------- */

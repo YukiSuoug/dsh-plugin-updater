@@ -17,6 +17,8 @@ const T = {
   refreshing: "检查中…",
   checkedAt: (time) => `上次检查 ${time}`,
   never: "尚未检查",
+  hostRev: (rev) => `宿主 ${rev}`,
+  hostRevHint: "宿主半区代码的版本号。若它比 package.json 的版本旧，说明 DSH 里跑着的还是旧代码——重启 DSH 才生效。",
   allFresh: "全部已是最新",
   summaryUpdates: (count) => `${count} 个插件有新版本`,
   summaryTotal: (count) => `共 ${count} 个已安装插件`,
@@ -579,14 +581,19 @@ export function UpdatesTab() {
     }
   }, []);
 
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState(null);
 
   const openTarget = useCallback(async (row) => {
-    setNotice("");
+    setNotice(null);
     try {
-      await postJson("/open", { name: row.name });
+      const answer = await postJson("/open", { name: row.name });
+      // 「没反应」和「打开了但窗口在后面」必须能区分开，所以成功也要给回执
+      setNotice({
+        kind: "ok",
+        text: `已交给系统打开：${answer.target || row.open?.target || row.name}${answer.via ? `（${answer.via}）` : ""}`,
+      });
     } catch (error) {
-      setNotice(String(error?.message || error));
+      setNotice({ kind: "error", text: String(error?.message || error) });
     }
   }, []);
 
@@ -624,6 +631,12 @@ export function UpdatesTab() {
           <span className="pu-checked">
             {data?.checkedAt ? T.checkedAt(clockText(data.checkedAt)) : T.never}
           </span>
+          <span
+            className="pu-hostrev"
+            title={T.hostRevHint}
+          >
+            {T.hostRev(data?.hostRev || "?")}
+          </span>
           <SourcePicker
             options={data?.sources?.options || []}
             source={source}
@@ -648,10 +661,10 @@ export function UpdatesTab() {
         </div>
       ) : null}
 
-      {notice !== "" ? (
-        <div className="pu-banner pu-banner-error">
-          <span>{notice}</span>
-          <button type="button" className="pu-btn" onClick={() => setNotice("")}>{T.close}</button>
+      {notice !== null ? (
+        <div className={`pu-banner ${notice.kind === "ok" ? "pu-banner-ok" : "pu-banner-error"}`}>
+          <span>{notice.text}</span>
+          <button type="button" className="pu-btn" onClick={() => setNotice(null)}>{T.close}</button>
         </div>
       ) : null}
 

@@ -585,13 +585,46 @@ function resolveOpenTarget(kind, name, source, installed) {
   return null
 }
 
-/** 跑一个启动命令，只要不是「命令不存在」就认为交出去了。 */
-function spawnOpener(command, args) {
+/** 宿主代码版本号：用来判断「跑着的还是不是新代码」（改了宿主半区就 +1）。 */
+const HOST_REV = 'r4'
+
+/**
+ * 拿 Electron 的 shell（DSH 桌面端才有）。
+ * `shell.openPath` 是应用打开本地目录的标准入口：主进程直接和系统交互，
+ * 能处理前台窗口、提权、已有 shell 进程这些用 spawn 外部命令时会静默失败的场景。
+ */
+async function electronShell() {
+  if (process.versions.electron === undefined) return null
+  try {
+    const { createRequire } = await import('node:module')
+    const require = createRequire(import.meta.url)
+    const electron = require('electron')
+    const shell = electron === null || electron === undefined ? null : electron.shell
+    if (shell === null || shell === undefined) return null
+    if (typeof shell.openPath !== 'function') return null
+    return shell
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 跑一个启动命令，只要不是「命令不存在」就认为交出去了。
+ * @param hideConsole 只对 cmd.exe 这类**控制台**程序设为 true。explorer.exe / rundll32.exe
+ *   是 GUI 子系统程序，没有控制台可隐藏；给它们带 `windowsHide` 会变成
+ *   `STARTF_USESHOWWINDOW + SW_HIDE`，explorer 可能因此把窗口开成隐藏的 —— 表现就是「点了没反应」。
+ */
+function spawnOpener(command, args, hideConsole) {
   return new Promise((resolve) => {
     try {
-      execFile(command, args, { windowsHide: true, timeout: 8000 }, (error) => {
+      execFile(command, args, { windowsHide: hideConsole === true, timeout: 8000 }, (error) => {
         if (error === null) {
-          resolve({ ok: true })
+          resolve({ ok: true, via: command })
+          return
+        }
+        // explorer.exe 正常交接也会返回 1，别把它当失败，否则会再开一个窗口
+        if (error.code === 1 && /explorer/i.test(command)) {
+          resolve({ ok: true, via: `${command}（退出码 1，正常）` })
           return
         }
         resolve({
@@ -609,10 +642,8 @@ function spawnOpener(command, args) {
 /**
  * 交给操作系统打开。只接受目录与 http(s) 地址。
  *
- * Windows 上**优先用 `rundll32 url.dll,FileProtocolHandler`**：它走 ShellExecute，
- * 与桌面双击同一个入口。`explorer.exe <path>` 在宿主被提权、或 shell 已经在跑的时候
- * 会直接以退出码 1 静默退出（什么都不打开）——这正是「点文件夹图标没反应」的原因。
- * explorer.exe 只作兜底。
+ * 优先级：Electron shell（桌面端） → ShellExecute 入口 → explorer.exe。
+ * 裸 spawn 的分支只为「非 Electron 环境」和「Electron shell 不可用」兜底。
  *
  * @returns {{ok: true, via: string}|{ok: false, error: string}}
  */
@@ -629,20 +660,46 @@ export async function openExternal(target, kind) {
     }
   }
 
-  const attempts = []
-  if (process.platform === 'win32') {
-    attempts.push(['rundll32.exe', ['url.dll,FileProtocolHandler', target]])
-    attempts.push(isUrl ? ['cmd.exe', ['/c', 'start', '', target]] : ['explorer.exe', [target]])
-  } else if (process.platform === 'darwin') {
-    attempts.push(['open', [target]])
-  } else {
-    attempts.push(['xdg-open', [target]])
+  const failures = []
+  const shell = await electronShell()
+  if (shell !== null) {
+    try {
+      if (isUrl) {
+        await shell.openExternal(target)
+        return { ok: true, via: 'electron.shell.openExternal' }
+      }
+      // openPath 用空字符串表示成功，否则是被交给系统的错误说明
+      const problem = await shell.openPath(target)
+      if (problem === '' || problem === undefined || problem === null) {
+        return { ok: true, via: 'electron.shell.openPath' }
+      }
+      failures.push(`electron.shell.openPath: ${String(problem)}`)
+    } catch (error) {
+      failures.push(`electron.shell.openPath: ${String(error?.message || error)}`)
+    }
   }
 
-  const failures = []
-  for (const [command, args] of attempts) {
-    const result = await spawnOpener(command, args)
-    if (result.ok) return { ok: true, via: command }
+  // 目录优先用 explorer.exe（原生方式）；网址优先用协议处理器。
+  // 第三个字段：是否隐藏控制台窗口（只有 cmd.exe 需要）。
+  const attempts = []
+  if (process.platform === 'win32') {
+    if (isUrl) {
+      attempts.push(['rundll32.exe', ['url.dll,FileProtocolHandler', target], false])
+      attempts.push(['cmd.exe', ['/c', 'start', '', target], true])
+    } else {
+      attempts.push(['explorer.exe', [target], false])
+      attempts.push(['rundll32.exe', ['url.dll,FileProtocolHandler', target], false])
+      attempts.push(['cmd.exe', ['/c', 'start', '', target], true])
+    }
+  } else if (process.platform === 'darwin') {
+    attempts.push(['open', [target], false])
+  } else {
+    attempts.push(['xdg-open', [target], false])
+  }
+
+  for (const [command, args, hideConsole] of attempts) {
+    const result = await spawnOpener(command, args, hideConsole)
+    if (result.ok) return { ok: true, via: result.via }
     failures.push(result.message)
   }
   return { ok: false, error: `系统没有响应打开请求（${failures.join('；')}）` }
@@ -943,7 +1000,7 @@ export function apply(ctx) {
       options: baseOrder.map((url) => ({ url, label: registryLabel(url) })),
       asked: registries,
     }
-    return { ok: true, checkedAt: now, runtime: runtimeVersion, registries, sources, counts, rows }
+    return { ok: true, checkedAt: now, runtime: runtimeVersion, hostRev: HOST_REV, registries, sources, counts, rows }
   }
 
   /** 真正执行一次更新：先卸载，再以同一启用状态装目标版本。 */
