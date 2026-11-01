@@ -4,6 +4,24 @@
   "private": true,
   "type": "module",
   "description": "检查已安装插件是否有新版本，并在插件页里一键更新（复用官方 plugin-manager 的安装管线）",
+  "author": "YukiSuoug",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YukiSuoug/dsh-plugin-updater.git"
+  },
+  "homepage": "https://github.com/YukiSuoug/dsh-plugin-updater#readme",
+  "bugs": {
+    "url": "https://github.com/YukiSuoug/dsh-plugin-updater/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "plugin-manager",
+    "update-checker",
+    "npm-registry"
+  ],
   "main": "./index.js",
   "exports": {
     ".": "./index.js",
@@ -35,6 +53,5 @@
   },
   "devDependencies": {
     "esbuild": "0.28.2"
-  },
-  "license": "MIT"
+  }
 }
