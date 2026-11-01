@@ -18,7 +18,7 @@ const T = {
   checkedAt: (time) => `上次检查 ${time}`,
   never: "尚未检查",
   hostRev: (rev) => `宿主 ${rev}`,
-  hostRevHint: "宿主半区代码的版本号。若它比 package.json 的版本旧，说明 DSH 里跑着的还是旧代码——重启 DSH 才生效。",
+  hostRevHint: "宿主半区 index.js 的内容指纹。改过宿主代码后它会变；如果它和 GitHub 上的不一致，说明 DSH 里跑着的还是旧模块——重启 DSH 才生效。",
   allFresh: "全部已是最新",
   summaryUpdates: (count) => `${count} 个插件有新版本`,
   summaryTotal: (count) => `共 ${count} 个已安装插件`,

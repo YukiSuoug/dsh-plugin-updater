@@ -18,9 +18,11 @@
  */
 
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /** 插件名，与 package.json / cordis.patch.yml 保持一致。 */
 export const name = 'dsh-plugin-updater'
@@ -585,8 +587,21 @@ function resolveOpenTarget(kind, name, source, installed) {
   return null
 }
 
-/** 宿主代码版本号：用来判断「跑着的还是不是新代码」（改了宿主半区就 +1）。 */
-const HOST_REV = 'r4'
+/**
+ * 宿主代码指纹：用来判断「DSH 里跑着的还是不是磁盘上这份代码」。
+ *
+ * 不能只靠 package.json 的版本号——那个是**读磁盘**得到的，界面上改了版本号，
+ * 进程里跑的可能还是启动时 import 进来的旧模块。所以取自身文件内容的哈希：
+ * 只要 index.js 变了，这个值一定变，忘了手改也不会骗人。
+ */
+const HOST_REV = (() => {
+  try {
+    const self = fs.readFileSync(fileURLToPath(import.meta.url))
+    return createHash('sha1').update(self).digest('hex').slice(0, 7)
+  } catch {
+    return 'unknown'
+  }
+})()
 
 /**
  * 拿 Electron 的 shell（DSH 桌面端才有）。

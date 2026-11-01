@@ -148,6 +148,10 @@ node tools/check-compat.mjs  # 版本范围匹配 + 兼容性判定（32 个用�
 
 `dist/client.js` 是构建产物，改 `src/` 后必须重新 build 再重启 DSH。
 
+**改了 `index.js`（宿主半区）必须重启 DSH**：宿主模块是启动时 import 的，装/改插件触发的
+HMR 只重组受影响的组合包，不保证重新 import 这个模块。页头那个「宿主 xxxxxxx」标签是
+`index.js` 内容的 sha1 前 7 位——它变了才说明新代码在跑。这个值自动生成，不需要手改。
+
 ## 已知限制
 
 - 本地 `link:` 开发插件没有「远程版本」概念，只能标为本地目录。
