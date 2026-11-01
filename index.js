@@ -581,37 +581,67 @@ function resolveOpenTarget(kind, name, source, installed) {
   return null
 }
 
-/** 交给操作系统打开；只接受目录与 http(s) 地址。 */
-function openExternal(target, kind) {
-  const isUrl = kind === 'url'
-  if (isUrl && !/^https?:\/\//i.test(target)) return Promise.resolve(false)
-  let command = ''
-  let args = []
-  if (process.platform === 'win32') {
-    if (isUrl) {
-      command = 'rundll32.exe'
-      args = ['url.dll,FileProtocolHandler', target]
-    } else {
-      command = 'explorer.exe'
-      args = [target]
-    }
-  } else if (process.platform === 'darwin') {
-    command = 'open'
-    args = [target]
-  } else {
-    command = 'xdg-open'
-    args = [target]
-  }
+/** 跑一个启动命令，只要不是「命令不存在」就认为交出去了。 */
+function spawnOpener(command, args) {
   return new Promise((resolve) => {
     try {
-      execFile(command, args, { windowsHide: true, timeout: 10000 }, (error) => {
-        // explorer.exe 即便成功也常返回非 0；只有「命令根本不存在」才算失败
-        resolve(!(error && (error.code === 'ENOENT' || error.code === 2)))
+      execFile(command, args, { windowsHide: true, timeout: 8000 }, (error) => {
+        if (error === null) {
+          resolve({ ok: true })
+          return
+        }
+        resolve({
+          ok: false,
+          code: error.code === undefined ? '' : String(error.code),
+          message: `${command} 退出码 ${error.code === undefined ? '?' : error.code}`,
+        })
       })
-    } catch {
-      resolve(false)
+    } catch (error) {
+      resolve({ ok: false, code: 'throw', message: String(error?.message || error) })
     }
   })
+}
+
+/**
+ * 交给操作系统打开。只接受目录与 http(s) 地址。
+ *
+ * Windows 上**优先用 `rundll32 url.dll,FileProtocolHandler`**：它走 ShellExecute，
+ * 与桌面双击同一个入口。`explorer.exe <path>` 在宿主被提权、或 shell 已经在跑的时候
+ * 会直接以退出码 1 静默退出（什么都不打开）——这正是「点文件夹图标没反应」的原因。
+ * explorer.exe 只作兜底。
+ *
+ * @returns {{ok: true, via: string}|{ok: false, error: string}}
+ */
+export async function openExternal(target, kind) {
+  const isUrl = kind === 'url'
+  if (isUrl && !/^https?:\/\//i.test(target)) {
+    return { ok: false, error: '只允许打开 http(s) 地址' }
+  }
+  if (!isUrl) {
+    try {
+      if (!fs.statSync(target).isDirectory()) return { ok: false, error: '目标不是目录' }
+    } catch {
+      return { ok: false, error: '目录不存在（插件可能已卸载）' }
+    }
+  }
+
+  const attempts = []
+  if (process.platform === 'win32') {
+    attempts.push(['rundll32.exe', ['url.dll,FileProtocolHandler', target]])
+    attempts.push(isUrl ? ['cmd.exe', ['/c', 'start', '', target]] : ['explorer.exe', [target]])
+  } else if (process.platform === 'darwin') {
+    attempts.push(['open', [target]])
+  } else {
+    attempts.push(['xdg-open', [target]])
+  }
+
+  const failures = []
+  for (const [command, args] of attempts) {
+    const result = await spawnOpener(command, args)
+    if (result.ok) return { ok: true, via: command }
+    failures.push(result.message)
+  }
+  return { ok: false, error: `系统没有响应打开请求（${failures.join('；')}）` }
 }
 
 // ---------------------------------------------------------------------------
@@ -1174,9 +1204,11 @@ export function apply(ctx) {
         return
       }
       const opened = await openExternal(open.target, open.kind)
-      writeJson(response, opened ? 200 : 500, opened
-        ? { ok: true, kind: open.kind, target: open.target }
-        : { ok: false, error: '系统没有响应打开请求' })
+      if (opened.ok === true) {
+        writeJson(response, 200, { ok: true, kind: open.kind, target: open.target, via: opened.via })
+      } else {
+        writeJson(response, 500, { ok: false, error: opened.error })
+      }
       return
     }
     writeJson(response, 404, { ok: false, error: '未知接口' })
