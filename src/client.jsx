@@ -43,6 +43,10 @@ const T = {
   statusError: "查询失败",
   tagOfficial: "官方",
   tagOff: "已关闭",
+  tagIncompatible: "不兼容",
+  compatNeed: "新版要求",
+  compatBlocked: "新版与当前 DSH 不兼容，已禁用更新",
+  compatDetail: (need, runtime) => `新版要求 ${need}，当前 DSH ${runtime}。已在本机 compatibility.json 授权过的，请到插件页用「添加插件」手动安装。`,
   groupEnabled: "已启用",
   groupDisabled: "已停用",
   openFolder: "打开本地文件夹",
@@ -162,8 +166,30 @@ function sortRows(rows) {
   });
 }
 
-function RowAction({ row, onUpdate }) {
+/** 把兼容性要求拼成一行字：`engines.dsh >=0.3.0`。 */
+function compatText(compat) {
+  if (compat === null || compat === undefined || compat.ok !== false) return "";
+  return Object.entries(compat.requirements || {})
+    .map(([key, value]) => `${key} ${value}`)
+    .join("、");
+}
+
+function RowAction({ row, runtime, onUpdate }) {
+  const incompatible = row.compat !== null && row.compat !== undefined && row.compat.ok === false;
   if (row.status === "update" || (row.status === "manual" && row.updatable === true)) {
+    const label = row.status === "update" ? T.update : T.reinstall;
+    if (incompatible) {
+      return (
+        <button
+          type="button"
+          className="pu-btn"
+          disabled
+          title={T.compatDetail(compatText(row.compat), runtime)}
+        >
+          {label}
+        </button>
+      );
+    }
     return (
       <button
         type="button"
@@ -171,7 +197,7 @@ function RowAction({ row, onUpdate }) {
         onClick={() => onUpdate(row)}
         title={row.note || ""}
       >
-        {row.status === "update" ? T.update : T.reinstall}
+        {label}
       </button>
     );
   }
@@ -186,11 +212,12 @@ function RowAction({ row, onUpdate }) {
   return <span className={`pu-state${tone}`} title={row.note || ""}>{text}</span>;
 }
 
-function UpdateRow({ row, onUpdate, onOpen, busy }) {
+function UpdateRow({ row, runtime, onUpdate, onOpen, busy }) {
   const initial = String(row.title || row.name || "?").trim().slice(0, 1).toUpperCase();
   const target = row.latest || "";
   const showArrow = target !== "" && target !== row.version && row.status !== "manual";
   const openLabel = row.open?.kind === "folder" ? T.openFolder : T.openRepo;
+  const incompatible = row.compat !== null && row.compat !== undefined && row.compat.ok === false;
   return (
     <div className={`pu-row${row.status === "update" ? " is-update" : ""}${busy ? " is-busy" : ""}`}>
       <div className="pu-icon">
@@ -201,6 +228,14 @@ function UpdateRow({ row, onUpdate, onOpen, busy }) {
           <span className="pu-title">{row.title || row.name}</span>
           {row.official ? <span className="pu-tag">{T.tagOfficial}</span> : null}
           {row.enabled === false ? <span className="pu-tag pu-tag-muted">{T.tagOff}</span> : null}
+          {incompatible ? (
+            <span
+              className="pu-tag pu-tag-warn"
+              title={T.compatDetail(compatText(row.compat), runtime)}
+            >
+              {T.tagIncompatible}
+            </span>
+          ) : null}
         </div>
         <div className="pu-sub">
           <code>{row.name}</code>
@@ -223,7 +258,7 @@ function UpdateRow({ row, onUpdate, onOpen, busy }) {
             {row.open.kind === "folder" ? <FolderIcon /> : <LinkIcon />}
           </button>
         ) : null}
-        <RowAction row={row} onUpdate={onUpdate} />
+        <RowAction row={row} runtime={runtime} onUpdate={onUpdate} />
       </div>
     </div>
   );
@@ -355,7 +390,7 @@ function Output({ text }) {  if (typeof text !== "string" || text.trim() === "")
   );
 }
 
-function Dialog({ dialog, onCancel, onConfirm, onClose, labelOf }) {
+function Dialog({ dialog, onCancel, onConfirm, onClose, labelOf, runtime }) {
   if (dialog === null) return null;
   const { row, mode, job } = dialog;
   const title = row.title || row.name;
@@ -370,6 +405,9 @@ function Dialog({ dialog, onCancel, onConfirm, onClose, labelOf }) {
           {row.latest ? <><span className="pu-arrow">→</span><code className="pu-v-new">{row.latest}</code></> : null}
         </div>
         <p className="pu-dialog-text">{T.confirmHint}</p>
+        {row.compat !== null && row.compat !== undefined && row.compat.ok === false ? (
+          <p className="pu-dialog-warn">{T.compatDetail(compatText(row.compat), runtime)}</p>
+        ) : null}
         <p className="pu-dialog-warn">{T.confirmRisk}</p>
         {row.enabled === false ? <p className="pu-dialog-text">{T.confirmEnabledOff}</p> : null}
         <p className="pu-dialog-meta">
@@ -644,6 +682,7 @@ export function UpdatesTab() {
                   <UpdateRow
                     key={row.name}
                     row={row}
+                    runtime={data?.runtime || ""}
                     busy={busy && dialog?.row?.name === row.name}
                     onUpdate={(target) => setDialog({ row: target, mode: "confirm", job: null, message: "" })}
                     onOpen={(target) => void openTarget(target)}
@@ -661,6 +700,7 @@ export function UpdatesTab() {
         onConfirm={() => { const row = dialog?.row; if (row) void startUpdate(row); }}
         onClose={() => setDialog(null)}
         labelOf={labelOf}
+        runtime={data?.runtime || ""}
       />
     </div>
   );

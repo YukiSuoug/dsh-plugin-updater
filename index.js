@@ -104,6 +104,154 @@ function isPrerelease(version) {
 }
 
 // ---------------------------------------------------------------------------
+// 版本范围匹配（只为 DSH 兼容性判定服务）
+//
+// 官方用的是 `semver.satisfies(v, range, { includePrerelease: true })`。
+// includePrerelease 让「预发布能不能匹配普通范围」这条最麻烦的规则消失了，
+// 剩下的就是分段比较，所以这里不引 semver 依赖，自己算。
+// ---------------------------------------------------------------------------
+
+/** 解析 `1.2.3` / `1.2` / `1` / `1.x` 这类片段；不可解析返回 null。 */
+function parsePartial(text) {
+  const match = /^v?(\d+|[xX*])(?:\.(\d+|[xX*]))?(?:\.(\d+|[xX*]))?(?:-([0-9A-Za-z.-]+))?$/.exec(String(text).trim())
+  if (match === null) return null
+  const num = (value) => (value === undefined || value === 'x' || value === 'X' || value === '*' ? null : Number(value))
+  return {
+    major: num(match[1]),
+    minor: num(match[2]),
+    patch: num(match[3]),
+    pre: match[4] === undefined ? [] : match[4].split('.'),
+  }
+}
+
+/** 把片段补成完整版本（缺的位当 0）。 */
+function fillVersion(partial, prerelease) {
+  return {
+    major: partial.major ?? 0,
+    minor: partial.minor ?? 0,
+    patch: partial.patch ?? 0,
+    pre: prerelease ? ['0'] : (partial.pre || []),
+  }
+}
+
+function compareParsed(a, b) {
+  for (const key of ['major', 'minor', 'patch']) {
+    if (a[key] !== b[key]) return a[key] > b[key] ? 1 : -1
+  }
+  return comparePre(a.pre, b.pre)
+}
+
+/** 单个比较符：`^` `~` `>=` `<=` `>` `<` `=` 或裸版本。 */
+function matchesComparator(version, token) {
+  const match = /^(\^|~|>=|<=|>|<|=)?\s*(.+)$/.exec(token)
+  if (match === null) return false
+  const operator = match[1] || '='
+  const partial = parsePartial(match[2])
+  if (partial === null) return false
+  const lower = fillVersion(partial, false)
+
+  if (operator === '=') {
+    if (partial.major === null) return true
+    if (partial.minor === null) {
+      return version.major === partial.major
+    }
+    if (partial.patch === null) {
+      return version.major === partial.major && version.minor === partial.minor
+    }
+    return compareParsed(version, lower) === 0
+  }
+  if (operator === '>=') return compareParsed(version, lower) >= 0
+  if (operator === '>') return compareParsed(version, lower) > 0
+  if (operator === '<=') return compareParsed(version, lower) <= 0
+  if (operator === '<') return compareParsed(version, lower) < 0
+
+  // ^ 与 ~：先满足下界，再卡上界。上界用 `-0` 表示「不含该版本的预发布」。
+  if (compareParsed(version, lower) < 0) return false
+  if (operator === '^') {
+    if (partial.major === null) return true
+    let upper
+    if (partial.major > 0) upper = { major: partial.major + 1, minor: 0, patch: 0, pre: ['0'] }
+    else if (partial.minor === null) upper = { major: 1, minor: 0, patch: 0, pre: ['0'] }
+    else if (partial.minor > 0) upper = { major: 0, minor: partial.minor + 1, patch: 0, pre: ['0'] }
+    else if (partial.patch === null) upper = { major: 0, minor: 1, patch: 0, pre: ['0'] }
+    else upper = { major: 0, minor: 0, patch: partial.patch + 1, pre: ['0'] }
+    return compareParsed(version, upper) < 0
+  }
+  // ~
+  if (partial.major === null) return true
+  const upper = partial.minor === null
+    ? { major: partial.major + 1, minor: 0, patch: 0, pre: ['0'] }
+    : { major: partial.major, minor: partial.minor + 1, patch: 0, pre: ['0'] }
+  return compareParsed(version, upper) < 0
+}
+
+/** 范围匹配：支持 `||`、空格 AND、通配符，等价于 semver.satisfies(..., { includePrerelease: true })。 */
+export function satisfiesVersion(version, range) {
+  const parsed = parseVersion(version)
+  const text = String(range == null ? '' : range).trim()
+  if (parsed === null || text === '') return false
+  return text.split('||').some((chunk) => {
+    const tokens = chunk.trim().split(/\s+/).filter((token) => token !== '')
+    if (tokens.length === 0) return false
+    return tokens.every((token) => matchesComparator(parsed, token))
+  })
+}
+
+// ---------------------------------------------------------------------------
+// DSH 版本兼容性：与官方 evaluatePluginCompatibility 同一套规则
+//   · 有 engines.dsh → 只看它
+//   · 否则看 peerDependencies 里所有 @deepseek-ai/dsh / @deepseek-ai/dsh-* 
+// ---------------------------------------------------------------------------
+
+/** 运行中的 DSH 版本：官方取的是 @deepseek-ai/dsh-app-boot 的 version，各包版本同步。 */
+function readRuntimeVersion(service) {
+  const candidates = []
+  try {
+    const anchor = service?.profile?.installAnchor
+    if (typeof anchor === 'string' && anchor !== '') {
+      candidates.push(anchor)
+      candidates.push(path.join(path.dirname(anchor), 'dsh-app-boot', 'package.json'))
+    }
+  } catch {
+    // profileContext 不可读就试别的
+  }
+  for (const file of candidates) {
+    try {
+      const version = JSON.parse(fs.readFileSync(file, 'utf8')).version
+      if (typeof version === 'string' && /^\d+\.\d+/.test(version)) return version
+    } catch {
+      // 换下一个候选
+    }
+  }
+  return ''
+}
+
+/**
+ * 判断「目标版本」能不能跑在当前 DSH 上。
+ * @returns {{ok: true}|{ok: false, requirements: Record<string,string>}|null} null 表示无法判断
+ */
+export function evaluateCompat(manifest, runtimeVersion) {
+  if (runtimeVersion === '' || manifest === null || typeof manifest !== 'object') return null
+  const engines = manifest.engines !== null && typeof manifest.engines === 'object' ? manifest.engines : {}
+  if (typeof engines.dsh === 'string') {
+    return satisfiesVersion(runtimeVersion, engines.dsh)
+      ? { ok: true }
+      : { ok: false, requirements: { 'engines.dsh': engines.dsh } }
+  }
+  const peers = manifest.peerDependencies !== null && typeof manifest.peerDependencies === 'object'
+    ? manifest.peerDependencies
+    : {}
+  const requirements = {}
+  for (const [name, range] of Object.entries(peers)) {
+    if (typeof range !== 'string') continue
+    if (name !== '@deepseek-ai/dsh' && !name.startsWith('@deepseek-ai/dsh-')) continue
+    const effective = range.startsWith('workspace:') ? runtimeVersion : range
+    if (!satisfiesVersion(runtimeVersion, effective)) requirements[name] = range
+  }
+  return Object.keys(requirements).length === 0 ? { ok: true } : { ok: false, requirements }
+}
+
+// ---------------------------------------------------------------------------
 // spec 解析：把 listBundles 给的 source 归类
 // ---------------------------------------------------------------------------
 
@@ -219,7 +367,11 @@ async function resolveLatest(packageName, currentVersion, registries) {
       }
       const target = pickTarget(answer.manifest, currentVersion)
       if (target === null) return { version: '', channel: 'latest', registry }
-      return { ...target, registry }
+      return {
+        ...target,
+        registry,
+        entry: answer.manifest.versions[target.version] || null,
+      }
     } catch (error) {
       const reason = error?.name === 'TimeoutError' || error?.name === 'AbortError'
         ? '超时'
@@ -600,6 +752,7 @@ export function apply(ctx) {
     })()
     const cache = readCache()
     const now = Date.now()
+    const runtimeVersion = readRuntimeVersion(service)
     const rows = []
     let dirty = false
 
@@ -626,6 +779,7 @@ export function apply(ctx) {
         status: 'skipped',
         note: '',
         updatable: false,
+        compat: null,
         open: resolveOpenTarget(parsed.kind, bundle.name, source, installed),
       }
 
@@ -692,11 +846,14 @@ export function apply(ctx) {
       // 注册表包
       const key = cacheKey(parsed.name, version)
       const cached = cache.entries[key]
+      // 缓存要跟运行版本绑定：DSH 升级后兼容性结论可能变
       const fresh = force !== true && cached !== undefined && now - cached.at < CACHE_TTL
+        && cached.runtime === runtimeVersion
       if (fresh) {
         row.latest = cached.latest || ''
         row.registry = cached.registry || ''
         row.note = cached.note || ''
+        row.compat = cached.compat === undefined ? null : cached.compat
       } else {
         const answer = await resolveLatest(parsed.name, version, registries)
         if (answer.error !== undefined) {
@@ -707,7 +864,14 @@ export function apply(ctx) {
         }
         row.latest = answer.version
         row.registry = answer.registry
-        cache.entries[key] = { latest: answer.version, registry: answer.registry, at: now }
+        row.compat = answer.version === '' ? null : evaluateCompat(answer.entry, runtimeVersion)
+        cache.entries[key] = {
+          latest: answer.version,
+          registry: answer.registry,
+          compat: row.compat,
+          runtime: runtimeVersion,
+          at: now,
+        }
         dirty = true
       }
       if (row.latest === '') {
@@ -717,7 +881,10 @@ export function apply(ctx) {
         row.status = 'update'
         row.target = `${parsed.name}@${row.latest}`
         row.updatable = bundle.removable === true
-        row.note = isPrerelease(row.latest) ? '有新版本（预发布通道）' : '有新版本'
+        const base = isPrerelease(row.latest) ? '有新版本（预发布通道）' : '有新版本'
+        row.note = row.compat !== null && row.compat.ok === false
+          ? `${base}，但与当前 DSH ${runtimeVersion} 不兼容`
+          : base
       } else {
         row.status = 'latest'
         row.note = '已是最新版本'
@@ -735,13 +902,14 @@ export function apply(ctx) {
       errors: rows.filter((row) => row.status === 'error').length,
       enabled: rows.filter((row) => row.enabled === true).length,
       disabled: rows.filter((row) => row.enabled !== true).length,
+      incompatible: rows.filter((row) => row.compat !== null && row.compat.ok === false).length,
     }
     const sources = {
       selected: requested,
       options: baseOrder.map((url) => ({ url, label: registryLabel(url) })),
       asked: registries,
     }
-    return { ok: true, checkedAt: now, registries, sources, counts, rows }
+    return { ok: true, checkedAt: now, runtime: runtimeVersion, registries, sources, counts, rows }
   }
 
   /** 真正执行一次更新：先卸载，再以同一启用状态装目标版本。 */
@@ -877,6 +1045,17 @@ export function apply(ctx) {
       }
       if (row.updatable !== true && row.status !== 'manual') {
         writeJson(response, 400, { ok: false, error: '这个插件当前没有可用的更新' })
+        return
+      }
+      if (row.compat !== null && row.compat.ok === false) {
+        const need = Object.entries(row.compat.requirements || {})
+          .map(([key, value]) => `${key} ${value}`)
+          .join('、')
+        const runtime = current.runtime ? `当前 DSH ${current.runtime}` : '当前 DSH'
+        writeJson(response, 400, {
+          ok: false,
+          error: `新版与${runtime}不兼容（要求 ${need}）。已在本机 compatibility.json 授权过的，请到插件页用「添加插件」手动安装。`,
+        })
         return
       }
       const target = typeof row.target === 'string' && row.target !== ''

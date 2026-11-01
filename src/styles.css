@@ -230,6 +230,13 @@
   opacity: 0.75;
 }
 
+/* 与当前 DSH 不兼容：更新按钮会被禁用，这个标签负责说明原因 */
+.pu-tag-warn {
+  border-color: var(--dsw-alias-state-warn-tertiary, rgba(245, 165, 36, 0.5));
+  color: var(--dsw-alias-state-warn-label, #b7791f);
+  cursor: help;
+}
+
 .pu-sub {
   display: flex;
   align-items: center;

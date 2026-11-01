@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-updater",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "检查已安装插件是否有新版本，并在插件页里一键更新（复用官方 plugin-manager 的安装管线）",

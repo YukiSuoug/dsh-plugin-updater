@@ -74,6 +74,29 @@ dsh plugin --profile <你的 profile> add link:<clone 下来的绝对路径>
 - 选择记在浏览器 `localStorage`（`dsh-plugin-updater:source:v1`），下次打开还是它；自定义地址单独存一份草稿。
 - 更新确认框里会写明这次要用哪个源（名字 · 主机）。
 
+## 兼容性预检
+
+判定的是**目标版本**能不能跑在当前 DSH 上（不是已装版本），规则与官方
+`@deepseek-ai/dsh-app-boot` 的 `evaluatePluginCompatibility` 完全一致：
+
+1. 目标版本声明了 `engines.dsh` → **只看它**，`peerDependencies` 不参与；
+2. 否则检查 `peerDependencies` 里所有 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 的范围；
+   `workspace:*` 视为当前运行时版本；
+3. 范围匹配等价于 `semver.satisfies(v, range, { includePrerelease: true })`。
+
+运行版本取自 `profileContext.installAnchor` 指向的 `@deepseek-ai/dsh` 包（各 `@deepseek-ai/*` 版本同步），
+与官方 `getDshRuntimeVersion()` 读的是同一个东西。
+
+不兼容的行会带「不兼容」标签、「更新」按钮置灰，悬停说明缺什么、当前是多少。
+服务端也会拒（`/update` 返回 400），避免绕过界面直接调接口。
+
+> **一个容易踩的语义坑**：`0.2.1-rc.5` 在 `0.2.1` **之前**，所以 peer 写 `^0.2.1` 的范围
+> **不包含任何 rc**。真实插件会写 `^0.2.1-rc.1`。官方也是这么判的，所以这里显示「不兼容」
+> 就是 DSH 真的会拒——`tools/check-compat.mjs` 把这条钉成了用例。
+
+第三方插件在本机 `compatibility.json` 里授权过的例外，这里不做判断（需要读 profile 的授权文件）；
+被标「不兼容」但确实授权过的，去插件页用「添加插件」手动装。
+
 ## 分类与「打开地址」
 
 - 列表按 `enabled` 分成 **已启用 / 已停用** 两组，各带数量；某一组为空就不显示。
@@ -118,8 +141,9 @@ removeBundle(name)  →  installBundle('name@<最新>', { enabled: 原启用状�
 ```sh
 npm install          # esbuild
 npm run build        # src/client.jsx -> dist/client.js
-node tools/smoke.mjs        # 宿主半区：假 ctx + 假 pluginManager 跑 /state 与更新全流程
+node tools/smoke.mjs         # 宿主半区：假 ctx + 假 pluginManager 跑 /state 与更新全流程
 node tools/check-client.mjs  # 浏览器半区：模拟 __ModuleLoader__ 验证导出与 slot 注册
+node tools/check-compat.mjs  # 版本范围匹配 + 兼容性判定（32 个用例，含 rc 陷阱）
 ```
 
 `dist/client.js` 是构建产物，改 `src/` 后必须重新 build 再重启 DSH。

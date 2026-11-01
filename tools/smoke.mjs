@@ -31,6 +31,14 @@ fakePackage('dsh-rewind-plugin', {
   repository: 'github:omdsh-dev/DSH-better-sidebar',
 })
 const localCheckout = fakePackage('dsh-moss-layout', { name: 'dsh-moss-layout', version: '0.12.2' })
+// 假的「运行中的 DSH」：installAnchor 指向 app-boot 的 package.json（官方就是读它的 version）
+const anchorDir = path.join(fakeProfile, 'app', 'node_modules', '@deepseek-ai')
+const appBootDir = path.join(anchorDir, 'dsh-app-boot')
+fs.mkdirSync(appBootDir, { recursive: true })
+fs.writeFileSync(path.join(appBootDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-app-boot', version: '0.2.1-rc.5' }), 'utf8')
+const installAnchor = path.join(anchorDir, 'dsh', 'package.json')
+fs.mkdirSync(path.dirname(installAnchor), { recursive: true })
+fs.writeFileSync(installAnchor, JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.1-rc.5' }), 'utf8')
 
 fs.writeFileSync(path.join(fakeProfile, 'pnpm-lock.yaml'), `lockfileVersion: '9.0'
 
@@ -62,7 +70,7 @@ const MOCK_BUNDLES = [
 
 function mockManager() {
   return {
-    profile: { dir: fakeProfile },
+    profile: { dir: fakeProfile, installAnchor },
     async registries() {
       return { registry: null, fallbackRegistries: [], resolved: 'https://registry.npmmirror.com' }
     },
@@ -148,8 +156,14 @@ for (const row of state.body.rows) {
   console.log(
     `  ${String(row.status).padEnd(8)} ${(row.enabled ? 'on ' : 'off')} ${row.name.padEnd(30)} ${String(row.version).padEnd(12)} -> ${String(row.latest).padEnd(12)} [${row.kind}] ${row.note}`,
   );
-  console.log(`           open => ${open}`);
+  const compat = row.compat === null || row.compat === undefined
+    ? '—'
+    : row.compat.ok === true
+      ? '兼容'
+      : `不兼容(${Object.entries(row.compat.requirements).map(([k, v]) => `${k} ${v}`).join(', ')})`;
+  console.log(`           open => ${open}    compat => ${compat}`);
 }
+console.log('runtime:', state.body.runtime, '| incompatible:', state.body.counts.incompatible);
 console.log('group counts:', JSON.stringify({ enabled: state.body.counts.enabled, disabled: state.body.counts.disabled }));
 console.log('source options:', state.body.sources.options.map((option) => `${option.label} <${option.url}>`).join(' | '));
 console.log('local checkout dir:', localCheckout);
